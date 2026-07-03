@@ -1,0 +1,55 @@
+name: safegate
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: safegate_postgres
+    environment:
+      POSTGRES_USER: safegate
+      POSTGRES_PASSWORD: safegate
+      POSTGRES_DB: safegate
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U safegate -d safegate"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7.4.1-alpine
+    container_name: safegate_redis
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    image: safegate/backend:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: safegate_backend
+    env_file:
+      - .env
+    environment:
+      MODE: all
+    ports:
+      - "18080:8080"
+      - "18081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+networks:
+  default:
+    name: safegate
+
+volumes:
+  pg_data:
+  redis_data:
