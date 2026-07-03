@@ -1,26 +1,83 @@
-# SafeGate
+<div align="center">
 
-一个可配置的 **IP 风控网关 / 反向代理防火墙**，支持管理员配置域名映射、真实 IP 透传、接口风控拦截与自定义 JSON 数据转发。
+# 🛡️ SafeGate
 
-## 定位
+**可配置的 IP 风控网关 / 反向代理防火墙**
 
-把它放在你的 Nginx（如 1Panel）后面作为上游服务：
+为 Nginx / 1Panel / Caddy 身后的站点提供域名映射、真实 IP 透传、接口风控拦截、JSON 请求体转换与访问日志审计。
+
+<p>
+  <a href="https://github.com/xy200303/SafeGate/stargazers"><img src="https://img.shields.io/github/stars/xy200303/SafeGate?style=social" alt="GitHub Stars"></a>
+  <a href="https://github.com/xy200303/SafeGate/issues"><img src="https://img.shields.io/github/issues/xy200303/SafeGate" alt="GitHub Issues"></a>
+</p>
+
+<p>
+  <img src="https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white" alt="Go">
+  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React">
+  <img src="https://img.shields.io/badge/Gin-1.12-008ECF?logo=go&logoColor=white" alt="Gin">
+  <img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL">
+  <img src="https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white" alt="Redis">
+  <img src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white" alt="Docker">
+</p>
+
+<p>
+  <a href="./docs/README.md">📚 文档中心</a> ·
+  <a href="#-快速开始">🚀 快速开始</a> ·
+  <a href="#-核心特性">✨ 核心特性</a> ·
+  <a href="#-部署架构">🏗️ 部署架构</a> ·
+  <a href="#-技术栈">🛠️ 技术栈</a>
+</p>
+
+<p>
+  <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
+  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg" alt="Platform">
+</p>
+
+</div>
+
+---
+
+## 🎯 产品定位
+
+把 SafeGate 放在你的统一入口网关之后，它会在请求到达上游业务站点之前完成风控判定、字段转换与日志记录：
 
 ```
-用户 → Nginx（80/443、SSL、域名解析）
-        ↓
-    SafeGate（风控、转发、转换）
-        ↓
-    目标站点 / Upstream
+用户请求
+    │
+    ▼
+Nginx / 1Panel / Caddy（SSL、域名解析）
+    │
+    ├─ admin.example.com ──▶ SafeGate Admin（管理后台 + API）
+    │
+    └─ api.example.com ────▶ SafeGate Proxy（风控、转发、审计）
+                                │
+                                ▼
+                         目标站点 / Upstream
 ```
 
-## 技术栈
+无论是保护注册接口不被刷单、代理外部站点时自动转换 JSON 字段，还是集中审计所有访问流量，SafeGate 都能以低侵入的方式接入现有架构。
 
-- **后端**：Go + Gin + GORM + PostgreSQL + Redis
-- **前端**：React + TypeScript + Vite + Tailwind CSS + shadcn/ui
-- **部署**：Docker Compose（本地开发） / 1Panel Nginx 反代（生产）
+## ✨ 核心特性
 
-## 快速开始（本地 Docker）
+| 特性 | 说明 |
+|------|------|
+| 🌐 **域名映射** | 将访问域名绑定到上游目标地址，支持默认站点兜底。 |
+| 🔍 **真实 IP 透传** | 自动从 `CF-Connecting-IP`、`X-Forwarded-For`、`X-Real-IP` 等头中提取真实 IP 并转发给上游。 |
+| 🛡️ **接口风控引擎** | 支持 `duplicate_ip`（成功后计数）与 `rate_limit`（请求即计数），可按 IP 或 IP+业务字段组合身份。 |
+| 📝 **JSON 字段映射** | 使用 `gjson/sjson` 路径语法，在转发前自动重命名、重组请求体字段。 |
+| 🔄 **响应智能改写** | `none` / `headers` / `full` 三种模式，处理重定向、Cookie 域与 HTML 正文链接。 |
+| 📊 **可视化审计** | 首页统计看板、全量访问日志、被拦截日志详情，支持查看 Query、Headers、Body。 |
+| 🖥️ **响应式管理后台** | React + shadcn/ui 构建的现代化控制台，桌面与移动端自适应。 |
+| 🐳 **一键部署** | Docker Compose 编排 PostgreSQL、Redis 与后端服务，开箱即用。 |
+
+## 🚀 快速开始
+
+### 环境要求
+
+- Docker Engine >= 24
+- Docker Compose >= 2
+
+### 1. 启动服务
 
 ```bash
 cp .env.example .env
@@ -28,68 +85,99 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-- 管理后台：`http://localhost:18081`（后端 `MODE=all` 直接挂载 `web/dist`）
-- 后端 API：`http://127.0.0.1:18081/api/admin`
-- 代理测试：`curl http://127.0.0.1:18080/post`
+### 2. 获取初始密码
 
-首次启动时若未设置 `ADMIN_PASSWORD`，请在后端日志中查看随机生成的管理员密码：
+如果未设置 `ADMIN_PASSWORD`，系统会生成随机密码并打印到日志：
 
 ```bash
 docker compose logs -f backend
 ```
 
-## 功能特性
+默认管理员账号：`admin`。
 
-- 管理员登录与 JWT 认证
-- 域名映射：绑定域名 → 目标域名
-- 真实 IP 识别与透传（`X-Real-IP`、`X-Forwarded-For`、`CF-Connecting-IP`）
-- 接口风控：重复 IP 拦截、速率限制
-- 自定义请求体/响应体 JSON 字段映射
-- 访问日志与移动端响应式管理后台
+### 3. 访问控制台
 
-## 文档
+| 入口 | 地址 |
+|------|------|
+| 管理后台 | `http://localhost:18081` |
+| 后端 API | `http://127.0.0.1:18081/api/admin` |
+| 代理入口 | `http://127.0.0.1:18080` |
 
-详细设计文档见 [docs](./docs)。
+## 🏗️ 部署架构
 
-## 开发
+生产环境推荐将 SafeGate 部署在 1Panel / Nginx 身后：
 
-### 后端
-
-```bash
-# 仅启动 API + 代理（配合 1Panel 等独立前端）
-ADMIN_PASSWORD=admin JWT_SECRET=secret \
-DATABASE_URL="postgres://safegate:safegate@127.0.0.1:5434/safegate?sslmode=disable" \
-REDIS_ADDR="127.0.0.1:6379" \
-PORT=18080 ADMIN_PORT=18081 MODE=api go run ./cmd/server
-
-# 后端自带管理页面（单文件部署 / 本地 Docker）
-ADMIN_PASSWORD=admin JWT_SECRET=secret \
-DATABASE_URL="postgres://safegate:safegate@127.0.0.1:5434/safegate?sslmode=disable" \
-REDIS_ADDR="127.0.0.1:6379" \
-PORT=18080 ADMIN_PORT=18081 MODE=all go run ./cmd/server
+```
+用户 → 1Panel Nginx（443 SSL）
+        │
+        ├─ admin.yourdomain.com → 127.0.0.1:18081
+        │
+        └─ api.yourdomain.com   → 127.0.0.1:18080
+                                    │
+                                    ▼
+                                目标站点 / Upstream
 ```
 
-### 前端开发
+- 设置 `MODE=api`，由 Nginx/1Panel 托管前端或继续使用 `MODE=all`。
+- 后端监听 `127.0.0.1`，避免直接暴露在公网。
+- 管理后台域名限制来源 IP 或仅内网使用。
+
+详细部署指南见 [docs/deployment.md](./docs/deployment.md)。
+
+## 🛠️ 技术栈
+
+**后端**
+
+- Go 1.25 + Gin 1.12
+- GORM + PostgreSQL 16
+- Redis 7 + go-redis 9
+- JWT（golang-jwt/jwt/v5）+ bcrypt
+- `net/http/httputil.ReverseProxy`
+- tidwall/gjson + tidwall/sjson
+
+**前端**
+
+- React 19 + TypeScript 6
+- Vite 8
+- Tailwind CSS 3 + shadcn/ui
+- React Router DOM 7
+- Axios
+
+**部署**
+
+- Docker + Docker Compose
+- 支持 1Panel / Nginx / Caddy 反代
+
+## 📚 文档
+
+- [docs/README.md](./docs/README.md) — 文档索引
+- [docs/architecture.md](./docs/architecture.md) — 系统架构
+- [docs/api.md](./docs/api.md) — Admin REST API
+- [docs/database.md](./docs/database.md) — 数据库设计
+- [docs/proxy.md](./docs/proxy.md) — 反向代理与风控
+- [docs/frontend.md](./docs/frontend.md) — 前端设计
+- [docs/deployment.md](./docs/deployment.md) — 部署指南
+- [docs/security.md](./docs/security.md) — 安全设计
+
+## 💻 本地开发
 
 ```bash
+# 启动完整服务栈
+docker compose up -d
+
+# 或单独启动前端开发服务器
 cd web
 cp .env.example .env.local
 npm install
 npm run dev
 ```
 
-开发服务器默认会把 `/api` 代理到 `http://127.0.0.1:18081`。
+后端本地开发说明见 [docs/deployment.md](./docs/deployment.md)。
 
-如需修改 API 地址，编辑 `web/.env.local`：
+## 🤝 参与贡献
 
-```env
-# 前后端同域（推荐）
-VITE_API_BASE_URL=/api
+欢迎通过 Issue 和 Pull Request 参与项目改进。修改代码时，请同步更新相关文档。
 
-# 跨域访问本地后端
-VITE_API_BASE_URL=http://127.0.0.1:18081/api
-```
+## 📄 License
 
-## License
-
-MIT
+[MIT](./LICENSE)
