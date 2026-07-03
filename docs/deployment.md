@@ -87,6 +87,12 @@ docker compose logs -f backend
 |------|------|--------|
 | `VITE_API_BASE_URL` | 前端 API 基础路径 | `/api` |
 
+### 构建环境变量
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `GOPROXY` | Docker 构建阶段执行 `go mod download` 使用的 Go 模块代理，国内环境建议使用默认值；海外或私有代理环境可改为 `https://proxy.golang.org,direct` 或内部代理地址 | `https://goproxy.cn,direct` |
+
 ### 安全建议
 
 - 生产环境必须设置 `ADMIN_PASSWORD` 和 `JWT_SECRET`，不要使用 `.env.example` 中的默认值。
