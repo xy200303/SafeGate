@@ -338,6 +338,11 @@ func (f *fakeAttemptStore) GetAttemptCount(_ context.Context, ruleID uint64, ide
 	return f.counts[f.key(ruleID, identity)], nil
 }
 
+func (f *fakeAttemptStore) SetAttemptCount(_ context.Context, ruleID uint64, identity string, count int64, _ int) error {
+	f.counts[f.key(ruleID, identity)] = count
+	return nil
+}
+
 func (f *fakeAttemptStore) key(ruleID uint64, identity string) string {
 	return fmt.Sprintf("attempt:%d:%s", ruleID, identity)
 }

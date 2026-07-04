@@ -57,6 +57,9 @@ func (h *Handler) RegisterAdmin(r *gin.Engine, authMiddleware gin.HandlerFunc) {
 		admin.GET("/logs", authMiddleware, h.listLogs)
 		admin.GET("/logs/stats", authMiddleware, h.statsLogs)
 		admin.GET("/blocks", authMiddleware, h.listBlockedLogs)
+		admin.GET("/firewall/blacklist", authMiddleware, h.listFirewallBlacklist)
+		admin.DELETE("/firewall/blacklist", authMiddleware, h.deleteFirewallBlacklistEntry)
+		admin.POST("/firewall/blacklist/clear", authMiddleware, h.clearFirewallBlacklist)
 	}
 }
 
@@ -264,6 +267,38 @@ func (h *Handler) listBlockedLogs(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"list": list, "total": total, "page": page, "page_size": pageSize}})
+}
+
+func (h *Handler) listFirewallBlacklist(c *gin.Context) {
+	list, err := h.ruleService.ListFirewallBlacklist(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": list})
+}
+
+func (h *Handler) deleteFirewallBlacklistEntry(c *gin.Context) {
+	key := strings.TrimSpace(c.Query("key"))
+	if key == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "key required"})
+		return
+	}
+	deleted, err := h.ruleService.DeleteFirewallBlacklistEntry(c.Request.Context(), key)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"deleted": deleted}, "message": "ok"})
+}
+
+func (h *Handler) clearFirewallBlacklist(c *gin.Context) {
+	deleted, err := h.ruleService.ClearFirewallBlacklist(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"deleted": deleted}, "message": "ok"})
 }
 
 // Proxy

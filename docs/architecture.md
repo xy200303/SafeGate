@@ -8,8 +8,8 @@ SafeGate 是一个可配置的 **IP 风控网关 / 反向代理防火墙**，采
   - **Proxy Server**（`PORT`）：反向代理入口，按 `Host` 头匹配域名映射。
   - **Admin Server**（`ADMIN_PORT`）：管理后台 REST API（`/api/admin/*`），`MODE=all` 时还负责托管前端构建产物。
 - **前端**：React + TypeScript + Vite + shadcn/ui 的单页应用，通过 Axios 调用 Admin API。
-- **持久化**：PostgreSQL 存储管理员、域名映射、风控规则、代理日志。
-- **缓存/计数/会话**：Redis 存储风控计数、JWT 黑名单。
+- **持久化**：PostgreSQL 存储管理员、域名映射、风控规则、风控计数、代理日志。
+- **缓存/会话**：Redis 缓存风控计数，并存储 JWT 黑名单。
 - **部署**：Docker Compose 编排 PostgreSQL、Redis、后端服务；生产环境可配合 1Panel / Nginx / Caddy 作为统一入口。
 
 ## 技术栈
@@ -151,7 +151,7 @@ ip_check/
 │   │   ├── auth.go              # JWT 校验中间件
 │   │   └── cors.go              # CORS 中间件
 │   ├── models/
-│   │   └── models.go            # GORM 模型：User、Domain、Rule、ProxyLog
+│   │   └── models.go            # GORM 模型：User、Domain、Rule、ProxyLog、FirewallAttempt
 │   ├── redis/
 │   │   └── redis.go             # Redis 客户端初始化
 │   ├── repository/
@@ -212,7 +212,7 @@ web/
 | `service` | 实现业务规则：登录认证、JWT 管理、域名/规则 CRUD、真实 IP 提取、风控判定、反向代理构造、日志写入。 |
 | `handler` | 绑定 HTTP 路由，处理请求参数绑定、调用 service、返回统一响应格式。 |
 | `middleware` | 提供可复用的 Gin 中间件（JWT 认证、CORS）。 |
-| `redis` | 初始化 Redis 连接，供 service 计数和黑名单使用。 |
+| `redis` | 初始化 Redis 连接，供 service 缓存风控计数和维护 JWT 黑名单使用。 |
 
 ## 统一响应格式
 
@@ -235,7 +235,7 @@ Admin API 使用统一 JSON 响应：
 1. **简单优先**：单后端二进制同时承载 API 与代理，降低部署和运维复杂度。
 2. **无状态**：后端不保存会话状态，JWT + Redis 黑名单实现登录态和登出。
 3. **可扩展**：
-   - 计数和黑名单基于 Redis，未来水平扩展时只需共享 Redis 和 PostgreSQL。
+   - 风控计数以 PostgreSQL 为准，Redis 作为共享缓存；未来水平扩展时共享 Redis 和 PostgreSQL 即可。
    - 代理层未来可拆分为独立服务，Admin Server 仅保留 API。
 4. **云原生**：所有依赖容器化，支持 `docker compose up -d --build` 一键启动。
 5. **可观测**：所有代理请求和拦截事件写入 `proxy_logs`，并提供可视化统计。

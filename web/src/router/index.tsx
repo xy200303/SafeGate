@@ -7,6 +7,7 @@ import { RulesPage } from "@/pages/Rules"
 import { LogsPage } from "@/pages/Logs"
 import { StatsPage } from "@/pages/Stats"
 import { BlockedLogsPage } from "@/pages/BlockedLogs"
+import { FirewallBlacklistPage } from "@/pages/FirewallBlacklist"
 
 function ProtectedRoute() {
   const token = localStorage.getItem("token")
@@ -33,6 +34,7 @@ export const router = createBrowserRouter([
       { path: "logs", element: <LogsPage /> },
       { path: "stats", element: <StatsPage /> },
       { path: "blocks", element: <BlockedLogsPage /> },
+      { path: "firewall-blacklist", element: <FirewallBlacklistPage /> },
       { index: true, element: <Navigate to="stats" replace /> },
     ],
   },

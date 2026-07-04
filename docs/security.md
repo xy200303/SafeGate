@@ -61,7 +61,7 @@
 ## 风控隔离
 
 - 风控规则仅影响匹配的路径与方法，避免误伤其他接口。
-- Redis 计数 key 包含规则 ID 与身份标识，格式为 `attempt:<rule_id>:<identity>`，防止跨规则污染。
+- 风控计数按规则 ID 与身份标识隔离，持久化记录保存在 PostgreSQL，Redis 缓存 key 格式为 `attempt:<rule_id>:<identity>`，防止跨规则污染。
 - 身份标识可以选择仅按 IP，或按 `IP + JSON 请求体字段` 组合，灵活平衡安全与用户体验。
 - `duplicate_ip` 与 `rate_limit` 两种规则类型分别适用于不同场景，避免单一策略导致过度拦截。
 

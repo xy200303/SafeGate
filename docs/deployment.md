@@ -115,6 +115,7 @@ docker compose logs -f backend
 - 镜像：`redis:7.4.1-alpine`
 - 容器名：`safegate_redis`
 - 持久化卷：`redis_data`
+- 用途：缓存风控计数并保存 JWT 登出黑名单；风控名单的持久化来源是 PostgreSQL，Redis 重启后可从数据库回填。
 - 健康检查：`redis-cli ping`
 
 ### backend
@@ -303,7 +304,7 @@ docker compose logs --tail=100 backend
 # 备份 PostgreSQL
 docker exec safegate_postgres pg_dump -U safegate safegate > safegate_$(date +%F).sql
 
-# 备份 Redis（若开启持久化）
+# 备份 Redis（一般只包含缓存和 JWT 黑名单，按需备份）
 docker cp safegate_redis:/data/dump.rdb ./dump.rdb
 ```
 

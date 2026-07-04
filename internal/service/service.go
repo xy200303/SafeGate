@@ -284,6 +284,61 @@ func (s *RuleService) ListByDomain(ctx context.Context, domainID uint64) ([]mode
 	return s.repo.ListRulesByDomain(ctx, domainID)
 }
 
+func (s *RuleService) ListFirewallBlacklist(ctx context.Context) ([]redis.AttemptEntry, error) {
+	list, err := s.repo.ListFirewallAttempts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]redis.AttemptEntry, 0, len(list))
+	seen := make(map[string]struct{}, len(list))
+	for _, item := range list {
+		entry := firewallAttemptEntry(item)
+		entries = append(entries, entry)
+		seen[entry.Key] = struct{}{}
+	}
+
+	cachedEntries, err := s.redis.ListAttempts(ctx)
+	if err != nil {
+		return entries, nil
+	}
+	for _, entry := range cachedEntries {
+		if _, ok := seen[entry.Key]; ok || entry.RuleID == 0 || entry.Identity == "" {
+			continue
+		}
+		entries = append(entries, entry)
+		seen[entry.Key] = struct{}{}
+		_ = s.repo.SaveFirewallAttemptCount(ctx, entry.RuleID, entry.Identity, entry.Count, entry.TTLSeconds)
+	}
+	return entries, nil
+}
+
+func (s *RuleService) DeleteFirewallBlacklistEntry(ctx context.Context, key string) (bool, error) {
+	redisDeleted, err := s.redis.DeleteAttempt(ctx, key)
+	if err != nil {
+		return false, err
+	}
+	dbDeleted, err := s.repo.DeleteFirewallAttemptByKey(ctx, key)
+	if err != nil {
+		return false, err
+	}
+	return redisDeleted || dbDeleted, nil
+}
+
+func (s *RuleService) ClearFirewallBlacklist(ctx context.Context) (int64, error) {
+	redisDeleted, err := s.redis.ClearAttempts(ctx)
+	if err != nil {
+		return redisDeleted, err
+	}
+	dbDeleted, err := s.repo.ClearFirewallAttempts(ctx)
+	if err != nil {
+		return redisDeleted, err
+	}
+	if dbDeleted > redisDeleted {
+		return dbDeleted, nil
+	}
+	return redisDeleted, nil
+}
+
 // ProxyService
 
 type ProxyService struct {
@@ -294,6 +349,7 @@ type ProxyService struct {
 type attemptStore interface {
 	IncrementAttempt(ctx context.Context, ruleID uint64, identity string, windowSeconds int) (int64, error)
 	GetAttemptCount(ctx context.Context, ruleID uint64, identity string) (int64, error)
+	SetAttemptCount(ctx context.Context, ruleID uint64, identity string, count int64, ttlSeconds int) error
 }
 
 func NewProxyService(repo *repository.Repository, redis attemptStore) *ProxyService {
@@ -314,6 +370,40 @@ func (s *ProxyService) ListRulesByDomain(ctx context.Context, domainID uint64) (
 
 const maxBodySize = 10 << 20
 
+func firewallAttemptEntry(item models.FirewallAttempt) redis.AttemptEntry {
+	return redis.AttemptEntry{
+		Key:        fmt.Sprintf("attempt:%d:%s", item.RuleID, item.Identity),
+		RuleID:     item.RuleID,
+		Identity:   item.Identity,
+		Count:      item.Count,
+		TTLSeconds: firewallAttemptTTL(item.ExpiresAt),
+	}
+}
+
+func firewallAttemptTTL(expiresAt *time.Time) int64 {
+	if expiresAt == nil {
+		return -1
+	}
+	duration := time.Until(*expiresAt)
+	if duration <= 0 {
+		return -2
+	}
+	return int64((duration + time.Second - 1) / time.Second)
+}
+
+func (s *ProxyService) attemptCount(ctx context.Context, ruleID uint64, identity string) (int64, error) {
+	count, err := s.redis.GetAttemptCount(ctx, ruleID, identity)
+	if err != nil || count > 0 || s.repo == nil {
+		return count, err
+	}
+	persistedCount, ttlSeconds, err := s.repo.GetFirewallAttemptCount(ctx, ruleID, identity)
+	if err != nil || persistedCount == 0 {
+		return persistedCount, err
+	}
+	_ = s.redis.SetAttemptCount(ctx, ruleID, identity, persistedCount, ttlSeconds)
+	return persistedCount, nil
+}
+
 func (s *ProxyService) EvaluateRules(ctx context.Context, rules []models.Rule, r *http.Request, path string, body []byte, realIP string) (matched []models.Rule, blocked bool, status int, blockResp string, blockedRule *models.Rule, err error) {
 	method := r.Method
 	for _, rule := range rules {
@@ -331,7 +421,7 @@ func (s *ProxyService) EvaluateRules(ctx context.Context, rules []models.Rule, r
 			continue
 		}
 		identity := buildIdentity(realIP, rule.IdentityFields, body, r.Header.Get("Content-Type"))
-		count, err := s.redis.GetAttemptCount(ctx, rule.ID, identity)
+		count, err := s.attemptCount(ctx, rule.ID, identity)
 		if err != nil {
 			return nil, false, 0, "", nil, err
 		}
@@ -370,6 +460,15 @@ func (s *ProxyService) RecordAttempts(ctx context.Context, rules []models.Rule, 
 
 	for _, rule := range rules {
 		identity := buildIdentity(realIP, rule.IdentityFields, body, contentType)
+		if s.repo != nil {
+			persistedCount, err := s.repo.IncrementFirewallAttempt(recordCtx, rule.ID, identity, rule.WindowSeconds)
+			if err == nil {
+				_ = s.redis.SetAttemptCount(recordCtx, rule.ID, identity, persistedCount, rule.WindowSeconds)
+				_ = domainID
+				_ = path
+				continue
+			}
+		}
 		_, err := s.redis.IncrementAttempt(recordCtx, rule.ID, identity, rule.WindowSeconds)
 		if err != nil {
 			// log

@@ -38,7 +38,7 @@ Proxy Server 处理一次请求的完整流程如下：
 10. 设置转发头（X-Real-IP、X-Forwarded-For、X-Forwarded-Host 等）
 11. 转发到上游目标
 12. 接收响应并按 rewrite_mode 改写
-13. 对于 duplicate_ip 规则，若上游返回 2xx 则增加计数
+13. 对于 duplicate_ip 规则，若上游响应满足成功判定则增加计数
 14. 异步写入 proxy_logs
 ```
 
@@ -193,17 +193,21 @@ identity_fields = "user.phone,user.email"
 
 ### 计数方式
 
-使用 Redis String：
+计数以 PostgreSQL `firewall_attempts` 表为持久化来源，并同步写入 Redis String 作为快速缓存：
 
 ```
 key = attempt:<rule_id>:<identity>
 ```
 
+请求判定时会优先读取 Redis；如果 Redis miss，则回退读取 PostgreSQL，命中后再回填 Redis。因此 Redis 容器重启或缓存丢失不会让风控名单消失。
+
+升级兼容：管理后台读取风控名单时会合并 Redis 中尚未入库的旧 `attempt:*` 缓存，并尝试写入 PostgreSQL，避免从旧版本升级后页面突然看不到已有名单。
+
 #### duplicate_ip
 
 - **触发时机**：请求转发到上游后，根据响应成功判定通过时执行 `INCR`。
 - **典型用途**：限制同一 IP（或 IP+字段）成功注册、成功领取奖励等操作次数。
-- **TTL**：若 `window_seconds > 0`，计数后设置 TTL；`0` 表示永久。
+- **TTL**：若 `window_seconds > 0`，PostgreSQL 记录 `expires_at`，Redis 缓存设置相同 TTL；`0` 表示永久。
 
 成功判定由以下字段控制：
 
@@ -237,9 +241,9 @@ failure_location_match = "key=username_repeat_register"
 
 ### 拦截判定
 
-在 `INCR` 之前（`rate_limit`）或上游响应成功判定通过之后（`duplicate_ip`）检查当前计数：
+在本次请求计数前检查当前计数；`rate_limit` 命中规则后会立即计数，`duplicate_ip` 只有在上游响应满足成功判定后才计数：
 
-- 若 `count > max_attempts`，则触发拦截。
+- 若当前 `count >= max_attempts`，则触发拦截。
 - 返回 `block_status` 状态码和 `block_response` JSON。
 - 记录 `proxy_logs.blocked = true`。
 

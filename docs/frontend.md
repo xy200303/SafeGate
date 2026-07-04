@@ -63,7 +63,8 @@ web/
 │   │   ├── Domains.tsx          # 域名映射管理
 │   │   ├── Rules.tsx            # 接口风控规则管理
 │   │   ├── Logs.tsx             # 全量访问日志
-│   │   └── BlockedLogs.tsx      # 被拦截日志详情页
+│   │   ├── BlockedLogs.tsx      # 被拦截日志详情页
+│   │   └── FirewallBlacklist.tsx # 风控名单管理页
 │   ├── router/
 │   │   └── index.tsx            # BrowserRouter 配置与登录守卫
 │   ├── App.tsx
@@ -136,6 +137,7 @@ VITE_API_BASE_URL=http://127.0.0.1:18081/api
 | `/admin/rules?domain_id=` | `RulesPage` | 需登录 |
 | `/admin/logs` | `LogsPage` | 需登录 |
 | `/admin/blocks` | `BlockedLogsPage` | 需登录 |
+| `/admin/firewall-blacklist` | `FirewallBlacklistPage` | 需登录 |
 
 `ProtectedRoute` 通过检查 `localStorage` 中是否存在 `token` 来判断登录状态，未登录时重定向到 `/login`。
 
@@ -222,6 +224,14 @@ VITE_API_BASE_URL=http://127.0.0.1:18081/api
   - 请求体原文
 - 数据来源：`GET /api/admin/blocks`。
 
+### 风控名单页（/admin/firewall-blacklist）
+
+- 表格展示当前风控名单。
+- 列：规则 ID、身份标识、计数、过期时间、操作。
+- 支持刷新、删除单条、全部清空。
+- 数据来源：`GET /api/admin/firewall/blacklist`。
+- 删除或清空时会同时处理 PostgreSQL 持久化记录和 Redis 缓存。
+
 ## 布局与导航
 
 ### AdminLayout
@@ -233,6 +243,7 @@ VITE_API_BASE_URL=http://127.0.0.1:18081/api
   - 域名映射 → `/admin/domains`
   - 访问日志 → `/admin/logs`
   - 拦截日志 → `/admin/blocks`
+  - 风控名单 → `/admin/firewall-blacklist`
 - 底部提供退出登录按钮。
 - 当前路由高亮显示。
 
@@ -244,6 +255,7 @@ VITE_API_BASE_URL=http://127.0.0.1:18081/api
 - 域名映射：Globe
 - 访问日志：FileText
 - 拦截日志：ShieldAlert
+- 风控名单：ListX
 
 ## 状态管理
 
@@ -283,6 +295,9 @@ VITE_API_BASE_URL=http://127.0.0.1:18081/api
 | `listLogs` | GET | `/admin/logs` |
 | `getBlockedStats` | GET | `/admin/logs/stats` |
 | `listBlockedLogs` | GET | `/admin/blocks` |
+| `listFirewallBlacklist` | GET | `/admin/firewall/blacklist` |
+| `deleteFirewallBlacklistEntry` | DELETE | `/admin/firewall/blacklist?key=` |
+| `clearFirewallBlacklist` | POST | `/admin/firewall/blacklist/clear` |
 
 ## 响应式设计
 

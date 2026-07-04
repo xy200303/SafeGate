@@ -1,6 +1,6 @@
 # 数据库设计
 
-SafeGate 使用 PostgreSQL 作为主数据库，GORM 在启动时自动执行 `AutoMigrate` 创建或更新表结构。Redis 用于风控计数和 JWT 黑名单。
+SafeGate 使用 PostgreSQL 作为主数据库，GORM 在启动时自动执行 `AutoMigrate` 创建或更新表结构。风控计数持久化保存在 PostgreSQL，Redis 仅缓存运行时计数并保存 JWT 黑名单。
 
 ## 目录
 
@@ -118,11 +118,31 @@ SafeGate 使用 PostgreSQL 作为主数据库，GORM 在启动时自动执行 `A
 
 **数据保留建议：** 该表增长较快，生产环境建议定期归档或按时间分区，并避免长期保留完整请求体。
 
+### firewall_attempts
+
+风控计数表，作为重复提交和限流判断的持久化来源。Redis 重启或缓存丢失后，SafeGate 会从该表读取计数并回填缓存。
+
+| 字段 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| `id` | BIGSERIAL | PRIMARY KEY | 自增主键 |
+| `rule_id` | BIGINT | NOT NULL, UNIQUE INDEX | 对应风控规则 ID |
+| `identity` | TEXT | NOT NULL, UNIQUE INDEX | 真实 IP 与身份字段拼接后的标识 |
+| `count` | BIGINT | NOT NULL, DEFAULT `0` | 当前计数 |
+| `expires_at` | TIMESTAMPTZ | INDEX | 计数过期时间；为空表示不过期 |
+| `last_seen_at` | TIMESTAMPTZ | NOT NULL | 最近一次计数时间 |
+| `created_at` | TIMESTAMPTZ | - | 创建时间 |
+| `updated_at` | TIMESTAMPTZ | - | 更新时间 |
+
+**索引说明：**
+
+- `(rule_id, identity)` 唯一索引：保证同一规则下同一身份只有一条计数记录。
+- `expires_at` 普通索引：加速过期记录清理。
+
 ## Redis 键设计
 
 | 键 | 类型 | 说明 |
 |----|------|------|
-| `attempt:<rule_id>:<identity>` | String | 风控计数器。`INCR` 后，若 `window_seconds > 0` 则设置 TTL。 |
+| `attempt:<rule_id>:<identity>` | String | 风控计数缓存。实际持久化来源是 PostgreSQL `firewall_attempts`，Redis miss 时会从数据库回填；若 `window_seconds > 0` 则设置 TTL。 |
 | `jwt:blacklist:<jti>` | String | JWT 黑名单标记，TTL 为 token 剩余有效期。 |
 
 ### 计数键示例
@@ -147,11 +167,14 @@ users
 domains 1───* rules
   │
   └───────* proxy_logs
+
+rules 1───* firewall_attempts
 ```
 
 - 一个 `domain` 可拥有多条 `rule`。
 - 一个 `domain` 可对应多条 `proxy_log`。
 - `rule` 与 `proxy_log` 通过 `rule_id` / `rule_name` 关联，但 `proxy_log` 不建立外键约束，允许规则删除后日志仍可查询。
+- `firewall_attempts` 通过 `rule_id` 关联规则，用于持久化保存每条规则下各身份的计数。
 
 ## 实现说明与注意事项
 

@@ -37,7 +37,7 @@ SafeGate 是一个单体 Go 服务，同时运行两个 HTTP Server：
 1. **Proxy Server**（`PORT`，默认 `8080`）：对外提供反向代理能力，按请求 `Host` 头匹配域名映射。
 2. **Admin Server**（`ADMIN_PORT`，默认 `8081`）：提供管理后台 REST API，并在 `MODE=all` 时托管 React 前端静态页面。
 
-数据持久化使用 PostgreSQL，Redis 用于风控计数和 JWT 黑名单。前端使用 React 19 + TypeScript + Vite + Tailwind CSS + shadcn/ui 构建。
+数据持久化使用 PostgreSQL；风控计数持久化在 PostgreSQL 中，Redis 用于运行时计数缓存和 JWT 黑名单。前端使用 React 19 + TypeScript + Vite + Tailwind CSS + shadcn/ui 构建。
 
 ## 术语表
 

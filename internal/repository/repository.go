@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -257,4 +259,156 @@ func (r *Repository) StatsBlocked(ctx context.Context) (*models.BlockedStats, er
 	}
 
 	return stats, nil
+}
+
+// Firewall attempts
+
+func (r *Repository) IncrementFirewallAttempt(ctx context.Context, ruleID uint64, identity string, windowSeconds int) (int64, error) {
+	now := time.Now()
+	var expiresAt *time.Time
+	if windowSeconds > 0 {
+		t := now.Add(time.Duration(windowSeconds) * time.Second)
+		expiresAt = &t
+	}
+
+	var count int64
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", fmt.Sprintf("%d:%s", ruleID, identity)).Error; err != nil {
+			return err
+		}
+
+		var item models.FirewallAttempt
+		err := tx.Where("rule_id = ? AND identity = ?", ruleID, identity).First(&item).Error
+		if err != nil {
+			if err != gorm.ErrRecordNotFound {
+				return err
+			}
+			item = models.FirewallAttempt{
+				RuleID:     ruleID,
+				Identity:   identity,
+				Count:      1,
+				ExpiresAt:  expiresAt,
+				LastSeenAt: now,
+			}
+			count = item.Count
+			return tx.Create(&item).Error
+		}
+		if item.ExpiresAt != nil && item.ExpiresAt.Before(now) {
+			item.Count = 1
+		} else {
+			item.Count++
+		}
+		item.ExpiresAt = expiresAt
+		item.LastSeenAt = now
+		count = item.Count
+		return tx.Save(&item).Error
+	})
+	return count, err
+}
+
+func (r *Repository) GetFirewallAttemptCount(ctx context.Context, ruleID uint64, identity string) (int64, int, error) {
+	now := time.Now()
+	var item models.FirewallAttempt
+	err := r.db.WithContext(ctx).Where("rule_id = ? AND identity = ?", ruleID, identity).First(&item).Error
+	if err == gorm.ErrRecordNotFound {
+		return 0, 0, nil
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	if item.ExpiresAt != nil {
+		if !item.ExpiresAt.After(now) {
+			_ = r.db.WithContext(ctx).Delete(&item).Error
+			return 0, 0, nil
+		}
+		ttl := int(time.Until(*item.ExpiresAt).Seconds())
+		if ttl < 1 {
+			ttl = 1
+		}
+		return item.Count, ttl, nil
+	}
+	return item.Count, 0, nil
+}
+
+func (r *Repository) SaveFirewallAttemptCount(ctx context.Context, ruleID uint64, identity string, count int64, ttlSeconds int64) error {
+	if count <= 0 {
+		return nil
+	}
+	now := time.Now()
+	var expiresAt *time.Time
+	if ttlSeconds > 0 {
+		t := now.Add(time.Duration(ttlSeconds) * time.Second)
+		expiresAt = &t
+	}
+
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", fmt.Sprintf("%d:%s", ruleID, identity)).Error; err != nil {
+			return err
+		}
+
+		var item models.FirewallAttempt
+		err := tx.Where("rule_id = ? AND identity = ?", ruleID, identity).First(&item).Error
+		if err != nil {
+			if err != gorm.ErrRecordNotFound {
+				return err
+			}
+			return tx.Create(&models.FirewallAttempt{
+				RuleID:     ruleID,
+				Identity:   identity,
+				Count:      count,
+				ExpiresAt:  expiresAt,
+				LastSeenAt: now,
+			}).Error
+		}
+		if item.Count < count {
+			item.Count = count
+		}
+		item.ExpiresAt = expiresAt
+		item.LastSeenAt = now
+		return tx.Save(&item).Error
+	})
+}
+
+func (r *Repository) ListFirewallAttempts(ctx context.Context) ([]models.FirewallAttempt, error) {
+	if err := r.deleteExpiredFirewallAttempts(ctx); err != nil {
+		return nil, err
+	}
+	var list []models.FirewallAttempt
+	err := r.db.WithContext(ctx).Order("updated_at desc").Find(&list).Error
+	return list, err
+}
+
+func (r *Repository) DeleteFirewallAttemptByKey(ctx context.Context, key string) (bool, error) {
+	ruleID, identity, err := parseFirewallAttemptKey(key)
+	if err != nil {
+		return false, err
+	}
+	result := r.db.WithContext(ctx).Where("rule_id = ? AND identity = ?", ruleID, identity).Delete(&models.FirewallAttempt{})
+	return result.RowsAffected > 0, result.Error
+}
+
+func (r *Repository) ClearFirewallAttempts(ctx context.Context) (int64, error) {
+	result := r.db.WithContext(ctx).Where("1 = 1").Delete(&models.FirewallAttempt{})
+	return result.RowsAffected, result.Error
+}
+
+func (r *Repository) deleteExpiredFirewallAttempts(ctx context.Context) error {
+	return r.db.WithContext(ctx).
+		Where("expires_at IS NOT NULL AND expires_at <= ?", time.Now()).
+		Delete(&models.FirewallAttempt{}).Error
+}
+
+func parseFirewallAttemptKey(key string) (uint64, string, error) {
+	if !strings.HasPrefix(key, "attempt:") {
+		return 0, "", fmt.Errorf("invalid attempt key")
+	}
+	parts := strings.SplitN(key, ":", 3)
+	if len(parts) != 3 || parts[1] == "" || parts[2] == "" {
+		return 0, "", fmt.Errorf("invalid attempt key")
+	}
+	ruleID, err := strconv.ParseUint(parts[1], 10, 64)
+	if err != nil {
+		return 0, "", fmt.Errorf("invalid attempt key")
+	}
+	return ruleID, parts[2], nil
 }

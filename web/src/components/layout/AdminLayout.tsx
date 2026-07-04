@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
-import { FileText, Globe, Home, LayoutDashboard, LogOut, Menu, PanelLeft, Shield } from "lucide-react"
+import { FileText, Globe, Home, LayoutDashboard, ListX, LogOut, Menu, PanelLeft, Shield } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
@@ -13,6 +13,7 @@ const navItems = [
   { path: "/admin/domains", label: "域名映射", icon: Globe },
   { path: "/admin/logs", label: "访问日志", icon: LayoutDashboard },
   { path: "/admin/blocks", label: "拦截日志", icon: FileText },
+  { path: "/admin/firewall-blacklist", label: "风控名单", icon: ListX },
 ]
 
 export function AdminLayout({ children }: { children: React.ReactNode }) {

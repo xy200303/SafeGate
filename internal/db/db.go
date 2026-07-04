@@ -29,5 +29,6 @@ func migrate(db *gorm.DB) error {
 		&models.Domain{},
 		&models.Rule{},
 		&models.ProxyLog{},
+		&models.FirewallAttempt{},
 	)
 }

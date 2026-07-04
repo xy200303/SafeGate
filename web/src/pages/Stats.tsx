@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { BarChart3, Shield, UserX, Users } from "lucide-react"
+import { BarChart3, RefreshCw, Shield, UserX, Users } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -62,6 +62,7 @@ export function StatsPage() {
           <p className="text-sm text-muted-foreground">按被封锁客户端 IP 和规则维度聚合的数据概览</p>
         </div>
         <Button variant="outline" onClick={fetch} disabled={loading}>
+          <RefreshCw className={loading ? "animate-spin" : ""} />
           {loading ? "刷新中..." : "刷新"}
         </Button>
       </div>

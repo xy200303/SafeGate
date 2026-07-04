@@ -10,6 +10,7 @@
 - [域名映射接口](#域名映射接口)
 - [风控规则接口](#风控规则接口)
 - [访问日志接口](#访问日志接口)
+- [风控名单接口](#风控名单接口)
 - [错误码说明](#错误码说明)
 
 ## 认证机制
@@ -413,6 +414,75 @@ Authorization: Bearer <token>
 | `top_ips` | TOP 10 被拦截 IP 及次数 |
 | `top_rules` | TOP 10 触发规则及次数 |
 | `daily_trend` | 最近 7 天每日拦截次数 |
+
+## 风控名单接口
+
+### GET /api/admin/firewall/blacklist
+
+查看当前持久化风控名单。这里的名单主要来自 PostgreSQL `firewall_attempts` 表，用于判断重复提交或限流是否应被拦截；Redis 中的 `attempt:*` 仅作为运行时缓存，不包含管理员 JWT 登出黑名单。升级后如果 Redis 中还存在旧版本写入但尚未入库的 `attempt:*`，该接口会合并展示并尝试写入 PostgreSQL。
+
+**响应示例：**
+
+```json
+{
+  "code": 0,
+  "data": [
+    {
+      "key": "attempt:2:127.0.0.1|username=xiaoyun|mobile=15027195073",
+      "rule_id": 2,
+      "identity": "127.0.0.1|username=xiaoyun|mobile=15027195073",
+      "count": 1,
+      "ttl_seconds": -1
+    }
+  ]
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `key` | 风控记录操作标识，格式为 `attempt:<rule_id>:<identity>`，删除单条记录时使用 |
+| `rule_id` | 对应风控规则 ID |
+| `identity` | 真实 IP 与身份字段拼接后的标识 |
+| `count` | 当前计数 |
+| `ttl_seconds` | 剩余过期秒数；`-1` 表示不过期，`-2` 表示已过期或不存在 |
+
+### DELETE /api/admin/firewall/blacklist?key=
+
+删除一条风控名单记录。
+
+**查询参数：**
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `key` | 是 | 风控记录操作标识，必须以 `attempt:` 开头 |
+
+**响应示例：**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "deleted": true
+  }
+}
+```
+
+### POST /api/admin/firewall/blacklist/clear
+
+清空当前持久化风控名单，并同步清理 Redis 中所有 `attempt:*` 缓存。清空后，曾经被重复提交规则拦截的身份会重新获得一次提交机会。
+
+**响应示例：**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "deleted": 3
+  }
+}
+```
 
 ## 错误码说明
 

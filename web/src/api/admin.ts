@@ -117,9 +117,26 @@ export interface BlockedStats {
   daily_trend: DailyTrend[]
 }
 
+export interface FirewallBlacklistEntry {
+  key: string
+  rule_id: number
+  identity: string
+  count: number
+  ttl_seconds: number
+}
+
 export const getBlockedStats = () => api.get<ApiResponse<BlockedStats>>("/admin/logs/stats")
 
 export const listBlockedLogs = (page = 1, pageSize = 20) =>
   api.get<ApiResponse<{ list: ProxyLog[]; total: number; page: number; page_size: number }>>("/admin/blocks", {
     params: { page, page_size: pageSize },
   })
+
+export const listFirewallBlacklist = () =>
+  api.get<ApiResponse<FirewallBlacklistEntry[]>>("/admin/firewall/blacklist")
+
+export const deleteFirewallBlacklistEntry = (key: string) =>
+  api.delete<ApiResponse<{ deleted: boolean }>>("/admin/firewall/blacklist", { params: { key } })
+
+export const clearFirewallBlacklist = () =>
+  api.post<ApiResponse<{ deleted: number }>>("/admin/firewall/blacklist/clear")

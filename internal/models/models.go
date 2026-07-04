@@ -114,6 +114,17 @@ type ProxyLog struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
+type FirewallAttempt struct {
+	ID         uint64     `gorm:"primaryKey" json:"id"`
+	RuleID     uint64     `gorm:"not null;uniqueIndex:idx_firewall_attempt_rule_identity" json:"rule_id"`
+	Identity   string     `gorm:"type:text;not null;uniqueIndex:idx_firewall_attempt_rule_identity" json:"identity"`
+	Count      int64      `gorm:"not null;default:0" json:"count"`
+	ExpiresAt  *time.Time `gorm:"index" json:"expires_at"`
+	LastSeenAt time.Time  `gorm:"not null" json:"last_seen_at"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+}
+
 type TopIP struct {
 	ClientIP string `json:"client_ip"`
 	Count    int64  `json:"count"`
