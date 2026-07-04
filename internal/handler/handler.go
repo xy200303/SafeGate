@@ -283,10 +283,14 @@ func (h *Handler) Proxy() gin.HandlerFunc {
 			}
 		}()
 
-		host := strings.ToLower(strings.Split(c.Request.Host, ":")[0])
+		rawHost := strings.ToLower(c.Request.Host)
+		host := strings.ToLower(stripPort(c.Request.Host))
 		ctx := c.Request.Context()
 
-		domain, err := h.proxyService.GetDomainByHost(ctx, host)
+		domain, err := h.proxyService.GetDomainByHost(ctx, rawHost)
+		if err != nil && rawHost != host {
+			domain, err = h.proxyService.GetDomainByHost(ctx, host)
+		}
 		isDefault := false
 		if err != nil {
 			domain, err = h.proxyService.GetDefaultDomain(ctx)
@@ -336,7 +340,7 @@ func (h *Handler) Proxy() gin.HandlerFunc {
 
 		for _, rule := range matched {
 			if rule.RuleType == "rate_limit" {
-				h.proxyService.RecordAttempts(ctx, []models.Rule{rule}, domain.ID, c.Request.URL.Path, realIP, body)
+				h.proxyService.RecordAttempts(ctx, []models.Rule{rule}, domain.ID, c.Request.URL.Path, realIP, body, c.Request.Header.Get("Content-Type"))
 			}
 		}
 
@@ -359,15 +363,15 @@ func (h *Handler) Proxy() gin.HandlerFunc {
 			}
 		}
 		rewriteResponse(rb, target, rewriteBindDomain, clientScheme, domain.RewriteMode)
-		rb.flush()
 
-		if rb.statusCode >= 200 && rb.statusCode < 300 {
-			for _, rule := range matched {
-				if rule.RuleType == "duplicate_ip" {
-					h.proxyService.RecordAttempts(ctx, []models.Rule{rule}, domain.ID, c.Request.URL.Path, realIP, body)
+		for _, rule := range matched {
+			if rule.RuleType == "duplicate_ip" {
+				if h.proxyService.ShouldRecordSuccess(rule, rb.statusCode, rb.header.Get("Location")) {
+					h.proxyService.RecordAttempts(ctx, []models.Rule{rule}, domain.ID, c.Request.URL.Path, realIP, body, c.Request.Header.Get("Content-Type"))
 				}
 			}
 		}
+		rb.flush()
 
 		h.logProxy(domain, c.Request, realIP, target.String(), rb.statusCode, false, nil, "", nil)
 	}

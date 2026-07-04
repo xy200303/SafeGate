@@ -72,23 +72,27 @@ type Domain struct {
 }
 
 type Rule struct {
-	ID             uint64         `gorm:"primaryKey" json:"id"`
-	DomainID       uint64         `gorm:"not null;index" json:"domain_id"`
-	Domain         Domain         `gorm:"foreignKey:DomainID" json:"-"`
-	Name           string         `gorm:"size:128;not null" json:"name"`
-	PathPrefix     string         `gorm:"size:255;not null" json:"path_prefix"`
-	Methods        string         `gorm:"size:128;default:'ALL'" json:"methods"`
-	RuleType       string         `gorm:"size:32;not null" json:"rule_type"`
-	IdentityFields string         `gorm:"size:512" json:"identity_fields"`
-	MaxAttempts    int            `gorm:"default:1" json:"max_attempts"`
-	WindowSeconds  int            `gorm:"default:0" json:"window_seconds"`
-	BlockSeconds   int            `gorm:"default:0" json:"block_seconds"`
-	BlockStatus    int            `gorm:"default:403" json:"block_status"`
-	BlockResponse  JSONB          `gorm:"type:jsonb" json:"block_response"`
-	Enabled        bool           `gorm:"default:true" json:"enabled"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
-	DeletedAt      gorm.DeletedAt `gorm:"index" json:"-"`
+	ID                   uint64         `gorm:"primaryKey" json:"id"`
+	DomainID             uint64         `gorm:"not null;index" json:"domain_id"`
+	Domain               Domain         `gorm:"foreignKey:DomainID" json:"-"`
+	Name                 string         `gorm:"size:128;not null" json:"name"`
+	PathPrefix           string         `gorm:"size:255;not null" json:"path_prefix"`
+	QueryMatch           string         `gorm:"size:512" json:"query_match"`
+	Methods              string         `gorm:"size:128;default:'ALL'" json:"methods"`
+	RuleType             string         `gorm:"size:32;not null" json:"rule_type"`
+	IdentityFields       string         `gorm:"size:512" json:"identity_fields"`
+	SuccessStatuses      string         `gorm:"size:128;default:'2xx'" json:"success_statuses"`
+	SuccessLocationMatch string         `gorm:"size:512" json:"success_location_match"`
+	FailureLocationMatch string         `gorm:"size:512" json:"failure_location_match"`
+	MaxAttempts          int            `gorm:"default:1" json:"max_attempts"`
+	WindowSeconds        int            `gorm:"default:0" json:"window_seconds"`
+	BlockSeconds         int            `gorm:"default:0" json:"block_seconds"`
+	BlockStatus          int            `gorm:"default:403" json:"block_status"`
+	BlockResponse        JSONB          `gorm:"type:jsonb" json:"block_response"`
+	Enabled              bool           `gorm:"default:true" json:"enabled"`
+	CreatedAt            time.Time      `json:"created_at"`
+	UpdatedAt            time.Time      `json:"updated_at"`
+	DeletedAt            gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 type ProxyLog struct {

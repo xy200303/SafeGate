@@ -235,9 +235,13 @@ Authorization: Bearer <token>
       "domain_id": 1,
       "name": "单 IP 单次注册",
       "path_prefix": "/api/register",
+      "query_match": "",
       "methods": "POST",
       "rule_type": "duplicate_ip",
       "identity_fields": "phone",
+      "success_statuses": "2xx",
+      "success_location_match": "",
+      "failure_location_match": "",
       "max_attempts": 1,
       "window_seconds": 86400,
       "block_seconds": 0,
@@ -265,9 +269,13 @@ Authorization: Bearer <token>
   "domain_id": 1,
   "name": "IP 注册速率限制",
   "path_prefix": "/api/register",
+  "query_match": "",
   "methods": "POST",
   "rule_type": "rate_limit",
   "identity_fields": "",
+  "success_statuses": "2xx",
+  "success_location_match": "",
+  "failure_location_match": "",
   "max_attempts": 10,
   "window_seconds": 60,
   "block_seconds": 0,
@@ -287,9 +295,13 @@ Authorization: Bearer <token>
 | `domain_id` | int64 | 是 | - | 所属域名映射 ID |
 | `name` | string | 是 | - | 规则名称 |
 | `path_prefix` | string | 是 | - | 匹配的路径前缀，如 `/api/register` |
+| `query_match` | string | 否 | - | Query 参数匹配条件，使用标准 query 字符串格式，如 `e=index.post_register` 或 `e=index.post_register&type=1`；为空表示不限制 Query |
 | `methods` | string | 否 | `ALL` | 逗号分隔的 HTTP 方法，`ALL` 表示全部 |
 | `rule_type` | string | 是 | - | `duplicate_ip` 或 `rate_limit` |
-| `identity_fields` | string | 否 | - | 逗号分隔的 JSON 字段路径，用于构造身份标识 |
+| `identity_fields` | string | 否 | - | 逗号分隔的请求体字段路径，用于构造身份标识；JSON 使用 gjson 路径，表单使用字段名并兼容 `user.phone` → `user[phone]` |
+| `success_statuses` | string | 否 | `2xx` | `duplicate_ip` 成功计数状态码，支持 `2xx`、`302`、`200-299`、`2xx,302` |
+| `success_location_match` | string | 否 | - | 成功重定向 `Location` 的 Query 匹配条件，如 `key=register_success`；填写后必须匹配才计数 |
+| `failure_location_match` | string | 否 | - | 失败重定向 `Location` 的 Query 匹配条件，如 `key=username_repeat_register`；匹配后不计数 |
 | `max_attempts` | int | 否 | `1` | 最大允许次数 |
 | `window_seconds` | int | 否 | `0` | 计数窗口秒数，`0` 表示永久 |
 | `block_seconds` | int | 否 | `0` | 拦截后封禁时长（秒），当前预留未生效 |

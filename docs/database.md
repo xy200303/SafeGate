@@ -66,9 +66,13 @@ SafeGate 使用 PostgreSQL 作为主数据库，GORM 在启动时自动执行 `A
 | `domain_id` | BIGINT | NOT NULL, INDEX, FOREIGN KEY → domains.id | 所属域名映射 |
 | `name` | VARCHAR(128) | NOT NULL | 规则名称 |
 | `path_prefix` | VARCHAR(255) | NOT NULL | 路径前缀，如 `/api/register` |
+| `query_match` | VARCHAR(512) | - | Query 参数匹配条件，如 `e=index.post_register`；为空表示不限制 Query |
 | `methods` | VARCHAR(128) | DEFAULT `'ALL'` | 逗号分隔的 HTTP 方法，保存时转大写 |
 | `rule_type` | VARCHAR(32) | NOT NULL | `duplicate_ip` 或 `rate_limit` |
-| `identity_fields` | VARCHAR(512) | - | 逗号分隔的身份字段路径，如 `phone,email` |
+| `identity_fields` | VARCHAR(512) | - | 逗号分隔的身份字段路径，如 `phone,email`；支持 JSON 路径和 POST 表单字段 |
+| `success_statuses` | VARCHAR(128) | DEFAULT `'2xx'` | `duplicate_ip` 成功计数状态码，支持 `2xx`、`302`、`200-299`、`2xx,302` |
+| `success_location_match` | VARCHAR(512) | - | 成功重定向 `Location` 的 Query 匹配条件 |
+| `failure_location_match` | VARCHAR(512) | - | 失败重定向 `Location` 的 Query 匹配条件，匹配后不计数 |
 | `max_attempts` | INT | DEFAULT `1` | 最大允许次数 |
 | `window_seconds` | INT | DEFAULT `0` | 计数窗口（秒），`0` 表示永久 |
 | `block_seconds` | INT | DEFAULT `0` | 拦截后封禁时长（秒），当前预留，未生效 |

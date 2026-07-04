@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -9,10 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,9 +35,9 @@ var ErrUnauthorized = errors.New("unauthorized")
 var ErrNotFound = errors.New("not found")
 
 type AuthService struct {
-	repo   *repository.Repository
-	redis  *redis.Client
-	cfg    *config.Config
+	repo  *repository.Repository
+	redis *redis.Client
+	cfg   *config.Config
 }
 
 func NewAuthService(repo *repository.Repository, redis *redis.Client, cfg *config.Config) *AuthService {
@@ -245,17 +249,25 @@ func NewRuleService(repo *repository.Repository, redis *redis.Client) *RuleServi
 }
 
 func (s *RuleService) Create(ctx context.Context, r *models.Rule) error {
+	r.PathPrefix, r.QueryMatch = normalizeRulePathQuery(r.PathPrefix, r.QueryMatch)
 	r.Methods = strings.ToUpper(r.Methods)
 	if r.Methods == "" {
 		r.Methods = "ALL"
+	}
+	if strings.TrimSpace(r.SuccessStatuses) == "" {
+		r.SuccessStatuses = "2xx"
 	}
 	return s.repo.CreateRule(ctx, r)
 }
 
 func (s *RuleService) Update(ctx context.Context, id uint64, r *models.Rule) error {
+	r.PathPrefix, r.QueryMatch = normalizeRulePathQuery(r.PathPrefix, r.QueryMatch)
 	r.Methods = strings.ToUpper(r.Methods)
 	if r.Methods == "" {
 		r.Methods = "ALL"
+	}
+	if strings.TrimSpace(r.SuccessStatuses) == "" {
+		r.SuccessStatuses = "2xx"
 	}
 	return s.repo.UpdateRule(ctx, id, r)
 }
@@ -276,10 +288,15 @@ func (s *RuleService) ListByDomain(ctx context.Context, domainID uint64) ([]mode
 
 type ProxyService struct {
 	repo  *repository.Repository
-	redis *redis.Client
+	redis attemptStore
 }
 
-func NewProxyService(repo *repository.Repository, redis *redis.Client) *ProxyService {
+type attemptStore interface {
+	IncrementAttempt(ctx context.Context, ruleID uint64, identity string, windowSeconds int) (int64, error)
+	GetAttemptCount(ctx context.Context, ruleID uint64, identity string) (int64, error)
+}
+
+func NewProxyService(repo *repository.Repository, redis attemptStore) *ProxyService {
 	return &ProxyService{repo: repo, redis: redis}
 }
 
@@ -303,13 +320,17 @@ func (s *ProxyService) EvaluateRules(ctx context.Context, rules []models.Rule, r
 		if !rule.Enabled {
 			continue
 		}
-		if !strings.HasPrefix(path, rule.PathPrefix) {
+		pathPrefix, queryMatch := normalizeRulePathQuery(rule.PathPrefix, rule.QueryMatch)
+		if !strings.HasPrefix(path, pathPrefix) {
+			continue
+		}
+		if !queryMatches(queryMatch, r.URL.Query()) {
 			continue
 		}
 		if rule.Methods != "ALL" && !containsMethod(rule.Methods, method) {
 			continue
 		}
-		identity := buildIdentity(realIP, rule.IdentityFields, body)
+		identity := buildIdentity(realIP, rule.IdentityFields, body, r.Header.Get("Content-Type"))
 		count, err := s.redis.GetAttemptCount(ctx, rule.ID, identity)
 		if err != nil {
 			return nil, false, 0, "", nil, err
@@ -342,10 +363,14 @@ func injectRuleInfo(resp string, rule models.Rule) string {
 	return string(b)
 }
 
-func (s *ProxyService) RecordAttempts(ctx context.Context, rules []models.Rule, domainID uint64, path, realIP string, body []byte) {
+func (s *ProxyService) RecordAttempts(ctx context.Context, rules []models.Rule, domainID uint64, path, realIP string, body []byte, contentType string) {
+	_ = ctx
+	recordCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
 	for _, rule := range rules {
-		identity := buildIdentity(realIP, rule.IdentityFields, body)
-		_, err := s.redis.IncrementAttempt(ctx, rule.ID, identity, rule.WindowSeconds)
+		identity := buildIdentity(realIP, rule.IdentityFields, body, contentType)
+		_, err := s.redis.IncrementAttempt(recordCtx, rule.ID, identity, rule.WindowSeconds)
 		if err != nil {
 			// log
 		}
@@ -397,6 +422,19 @@ func (s *ProxyService) StatsBlocked(ctx context.Context) (*models.BlockedStats, 
 	return stats, nil
 }
 
+func (s *ProxyService) ShouldRecordSuccess(rule models.Rule, status int, location string) bool {
+	if !statusMatches(rule.SuccessStatuses, status) {
+		return false
+	}
+	if strings.TrimSpace(rule.FailureLocationMatch) != "" && locationQueryMatches(rule.FailureLocationMatch, location) {
+		return false
+	}
+	if strings.TrimSpace(rule.SuccessLocationMatch) != "" {
+		return locationQueryMatches(rule.SuccessLocationMatch, location)
+	}
+	return true
+}
+
 func (s *ProxyService) TransformBody(body []byte, contentType string, transform models.JSONB) ([]byte, error) {
 	if len(body) == 0 || len(transform) == 0 || string(transform) == "null" || string(transform) == "[]" {
 		return body, nil
@@ -429,19 +467,210 @@ func (s *ProxyService) TransformBody(body []byte, contentType string, transform 
 	return body, nil
 }
 
-func buildIdentity(realIP, fields string, body []byte) string {
+func buildIdentity(realIP, fields string, body []byte, contentType string) string {
 	parts := []string{realIP}
-	if strings.TrimSpace(fields) != "" && len(body) > 0 && gjson.ValidBytes(body) {
-		for _, f := range strings.Split(fields, ",") {
-			f = strings.TrimSpace(f)
-			if f == "" {
-				continue
-			}
-			v := gjson.GetBytes(body, f)
-			parts = append(parts, f+"="+v.String())
+	if strings.TrimSpace(fields) == "" || len(body) == 0 {
+		return strings.Join(parts, "|")
+	}
+	formValues := parseFormValues(body, contentType)
+	for _, f := range strings.Split(fields, ",") {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
 		}
+		parts = append(parts, f+"="+identityFieldValue(body, formValues, f))
 	}
 	return strings.Join(parts, "|")
+}
+
+func identityFieldValue(body []byte, formValues url.Values, field string) string {
+	if len(formValues) > 0 {
+		if v := formValues.Get(field); v != "" {
+			return v
+		}
+		return formValues.Get(dotPathToBracketPath(field))
+	}
+	if gjson.ValidBytes(body) {
+		return gjson.GetBytes(body, field).String()
+	}
+	return ""
+}
+
+func parseFormValues(body []byte, contentType string) url.Values {
+	mediaType, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		mediaType = strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	}
+	switch strings.ToLower(mediaType) {
+	case "application/x-www-form-urlencoded":
+		values, err := url.ParseQuery(string(body))
+		if err != nil {
+			return nil
+		}
+		return values
+	case "multipart/form-data":
+		boundary := params["boundary"]
+		if boundary == "" {
+			return nil
+		}
+		reader := multipart.NewReader(bytes.NewReader(body), boundary)
+		form, err := reader.ReadForm(maxBodySize)
+		if err != nil {
+			return nil
+		}
+		defer form.RemoveAll()
+		return form.Value
+	default:
+		return nil
+	}
+}
+
+func dotPathToBracketPath(path string) string {
+	parts := strings.Split(path, ".")
+	if len(parts) <= 1 {
+		return path
+	}
+	var b strings.Builder
+	b.WriteString(parts[0])
+	for _, part := range parts[1:] {
+		b.WriteString("[")
+		b.WriteString(part)
+		b.WriteString("]")
+	}
+	return b.String()
+}
+
+func normalizeRulePathQuery(pathPrefix, queryMatch string) (string, string) {
+	pathPrefix = strings.TrimSpace(pathPrefix)
+	queryMatch = strings.TrimSpace(strings.TrimPrefix(queryMatch, "?"))
+	if pathPrefix == "" {
+		return "/", queryMatch
+	}
+
+	parsed, err := url.Parse(pathPrefix)
+	if err != nil {
+		parts := strings.SplitN(pathPrefix, "?", 2)
+		pathPrefix = parts[0]
+		if len(parts) == 2 {
+			queryMatch = mergeQueryMatch(parts[1], queryMatch)
+		}
+		return normalizePathPrefix(pathPrefix), queryMatch
+	}
+
+	if parsed.Path != "" {
+		pathPrefix = parsed.Path
+	}
+	if parsed.RawQuery != "" {
+		queryMatch = mergeQueryMatch(parsed.RawQuery, queryMatch)
+	}
+	return normalizePathPrefix(pathPrefix), queryMatch
+}
+
+func normalizePathPrefix(pathPrefix string) string {
+	pathPrefix = strings.TrimSpace(pathPrefix)
+	if pathPrefix == "" {
+		return "/"
+	}
+	if !strings.HasPrefix(pathPrefix, "/") {
+		return "/" + pathPrefix
+	}
+	return pathPrefix
+}
+
+func mergeQueryMatch(fromPath, configured string) string {
+	fromPath = strings.TrimSpace(strings.TrimPrefix(fromPath, "?"))
+	configured = strings.TrimSpace(strings.TrimPrefix(configured, "?"))
+	if fromPath == "" {
+		return configured
+	}
+	if configured == "" || configured == fromPath {
+		return fromPath
+	}
+	return fromPath + "&" + configured
+}
+
+func queryMatches(match string, values url.Values) bool {
+	match = strings.TrimSpace(strings.TrimPrefix(match, "?"))
+	if match == "" {
+		return true
+	}
+	expected, err := url.ParseQuery(match)
+	if err != nil || len(expected) == 0 {
+		return false
+	}
+	for key, wantValues := range expected {
+		if len(wantValues) == 0 {
+			if _, ok := values[key]; !ok {
+				return false
+			}
+			continue
+		}
+		gotValues, ok := values[key]
+		if !ok {
+			return false
+		}
+		for _, want := range wantValues {
+			if !containsString(gotValues, want) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func containsString(list []string, value string) bool {
+	for _, item := range list {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
+func statusMatches(pattern string, status int) bool {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		pattern = "2xx"
+	}
+	for _, token := range strings.Split(pattern, ",") {
+		token = strings.ToLower(strings.TrimSpace(token))
+		if token == "" {
+			continue
+		}
+		if len(token) == 3 && token[1:] == "xx" {
+			prefix, err := strconv.Atoi(token[:1])
+			if err == nil && status/100 == prefix {
+				return true
+			}
+			continue
+		}
+		if strings.Contains(token, "-") {
+			parts := strings.SplitN(token, "-", 2)
+			min, minErr := strconv.Atoi(strings.TrimSpace(parts[0]))
+			max, maxErr := strconv.Atoi(strings.TrimSpace(parts[1]))
+			if minErr == nil && maxErr == nil && status >= min && status <= max {
+				return true
+			}
+			continue
+		}
+		code, err := strconv.Atoi(token)
+		if err == nil && status == code {
+			return true
+		}
+	}
+	return false
+}
+
+func locationQueryMatches(match, location string) bool {
+	location = strings.TrimSpace(location)
+	if location == "" {
+		return false
+	}
+	u, err := url.Parse(location)
+	if err != nil {
+		return false
+	}
+	return queryMatches(match, u.Query())
 }
 
 func containsMethod(list, method string) bool {

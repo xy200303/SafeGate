@@ -122,8 +122,9 @@ SafeGate 的“防火墙规则”指管理后台里的 **接口风控规则**。
 
 1. 规则已启用：`enabled = true`。
 2. 请求路径以 `path_prefix` 开头，例如 `/api/register` 会匹配 `/api/register/send`。
-3. 请求方法命中 `methods`，或 `methods = ALL`。
-4. 该规则属于当前访问域名对应的 `domain_id`。
+3. 如果配置了 `query_match`，请求 URL 必须包含对应 Query 参数，例如 `e=index.post_register`。
+4. 请求方法命中 `methods`，或 `methods = ALL`。
+5. 该规则属于当前访问域名对应的 `domain_id`。
 
 ### 配置项通俗解释
 
@@ -132,9 +133,13 @@ SafeGate 的“防火墙规则”指管理后台里的 **接口风控规则**。
 | `domain_id` | `1` | 这条规则挂在哪个域名映射下面。不同域名的规则互不影响。通常从“域名映射”页点“规则”进入时会自动带上。 |
 | `name` | `注册防重复` | 给管理员看的规则名称。建议写清楚用途，方便在拦截日志里快速判断是哪条规则触发。 |
 | `path_prefix` | `/api/register` | 要保护的接口路径前缀。只要请求路径以它开头就算命中；如果只想保护注册接口，不要填成 `/api` 这种过宽路径。 |
+| `query_match` | `e=index.post_register` | Query 参数匹配条件。为空时不限制 Query；填写后必须全部匹配才会触发规则。多个条件用 `&` 连接，例如 `e=index.post_register&type=1`。 |
 | `methods` | `POST` / `POST,PUT` / `ALL` | 限制哪些 HTTP 方法会被检查。注册、提交表单通常填 `POST`；所有方法都要检查时填 `ALL`。 |
 | `rule_type` | `duplicate_ip` | 规则类型。`duplicate_ip` 适合“成功后只能再来几次”的场景；`rate_limit` 适合“单位时间内最多请求几次”的限流场景。 |
-| `identity_fields` | `phone,email` | 身份字段。为空时只按真实 IP 统计；填写后会把真实 IP 和 JSON 请求体里的字段一起作为身份，例如 `IP + 手机号`，减少多个用户共用出口 IP 时的误伤。 |
+| `identity_fields` | `phone,email` | 身份字段。为空时只按真实 IP 统计；填写后会把真实 IP 和请求体字段一起作为身份，例如 `IP + 手机号`，减少多个用户共用出口 IP 时的误伤。支持 JSON、普通 POST 表单和 multipart 表单。 |
+| `success_statuses` | `2xx` / `2xx,302` | `duplicate_ip` 的成功计数状态码。默认只把 `2xx` 当成功；如果上游注册成功后返回 302，可填 `2xx,302`。 |
+| `success_location_match` | `key=register_success` | 可选。`duplicate_ip` 的成功重定向 Query 匹配条件；填写后，`Location` 里的 Query 必须匹配才计数。 |
+| `failure_location_match` | `key=username_repeat_register` | 可选。`duplicate_ip` 的失败重定向 Query 匹配条件；匹配到时不计入成功次数。适合上游用 302 跳转页面表示失败的站点。 |
 | `max_attempts` | `1` / `10` | 允许次数。当前计数达到这个值后，下一次命中规则的请求会被拦截。 |
 | `window_seconds` | `60` / `0` | 统计窗口，单位秒。`60` 表示 60 秒后计数过期；`0` 表示不过期，适合“同一身份只能成功注册一次”。 |
 | `block_seconds` | `0` | 预留字段，当前版本尚未实现额外封禁时长逻辑。实际是否拦截主要由 `max_attempts` 和 `window_seconds` 决定。 |
@@ -142,18 +147,20 @@ SafeGate 的“防火墙规则”指管理后台里的 **接口风控规则**。
 | `block_response` | `{"code":403,"message":"重复注册"}` | 被拦截时返回的 JSON 内容。浏览器访问时也会用里面的 `title`、`message`、`detail` 渲染防火墙拦截页。 |
 | `enabled` | `true` | 是否启用规则。调试或临时放行时可以关掉，不用删除规则。 |
 
+管理后台的“路径 / Query 匹配”输入框可以直接填写 `/index.php?e=index.post_register`，保存时会自动拆成 `path_prefix = /index.php` 和 `query_match = e=index.post_register`。
+
 ### 两种规则类型怎么选
 
 | 规则类型 | 什么时候计数 | 适合场景 | 举例 |
 |----------|--------------|----------|------|
-| `duplicate_ip` | 请求转发到上游后，只有上游返回 `2xx` 成功响应才计数。 | 防止同一 IP 或同一业务身份重复完成某个动作。 | 同一 IP 只能成功注册 1 次；同一 IP + 手机号只能领取 1 次奖励。 |
+| `duplicate_ip` | 请求转发到上游后，根据 `success_statuses`、`success_location_match`、`failure_location_match` 判断成功后再计数。 | 防止同一 IP 或同一业务身份重复完成某个动作。 | 同一 IP 只能成功注册 1 次；同一 IP + 手机号只能领取 1 次奖励。 |
 | `rate_limit` | 请求命中规则后、转发到上游前就计数。 | 防止短时间刷接口，不关心上游是否处理成功。 | 同一 IP 每 60 秒最多请求注册接口 10 次。 |
 
 简单理解：想限制“成功次数”用 `duplicate_ip`，想限制“访问频率”用 `rate_limit`。
 
 ### 身份字段如何工作
 
-`identity_fields` 用逗号分隔，字段名从 JSON 请求体里读取。假设真实 IP 是 `1.2.3.4`，配置为：
+`identity_fields` 用逗号分隔，字段名从请求体里读取。JSON 请求体支持 `gjson` 路径语法，普通 POST 表单和 multipart 表单支持按字段名读取，也兼容 `user.phone` 对应 `user[phone]` 这类常见嵌套表单写法。假设真实 IP 是 `1.2.3.4`，配置为：
 
 ```text
 identity_fields = phone,email
@@ -172,6 +179,26 @@ identity_fields = phone,email
 ```
 
 这样同一个出口 IP 下，不同手机号或邮箱可以分开计数。字段不存在时会按空值拼接，所以请尽量填写上游请求中稳定存在的字段。
+
+POST 表单也可以使用同样的字段配置：
+
+```http
+Content-Type: application/x-www-form-urlencoded
+
+phone=13800138000&email=a@example.com
+```
+
+如果表单字段使用括号表示嵌套：
+
+```http
+user[phone]=13800138000&user[email]=a@example.com
+```
+
+身份字段填写：
+
+```text
+user.phone,user.email
+```
 
 ### 拦截响应配置
 
@@ -203,6 +230,15 @@ API 请求被拦截时会返回 `block_status` 和 `block_response`。例如：
 | 同一 IP + 手机号只能成功提交一次 | `/api/register` | `POST` | `duplicate_ip` | `phone` | `1` | `0` | `403` |
 | 注册接口 1 分钟最多请求 10 次 | `/api/register` | `POST` | `rate_limit` | 留空 | `10` | `60` | `429` |
 | 同一 IP + 手机号 + 姓名 + 收款账户防重复 | `/api/submit` | `POST` | `duplicate_ip` | `phone,name,bank_account` | `1` | `0` | `403` |
+| 只保护 `/index.php?e=index.post_register` 注册表单 | `/index.php` | `POST` | `duplicate_ip` | `mobile,accountname,bankaccount` | `1` | `0` | `403` |
+
+其中最后一条还需要额外设置：
+
+```text
+query_match = e=index.post_register
+success_statuses = 2xx,302
+failure_location_match = key=username_repeat_register
+```
 
 ### 配置建议
 

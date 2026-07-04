@@ -20,9 +20,13 @@ export interface Rule {
   domain_id: number
   name: string
   path_prefix: string
+  query_match: string
   methods: string
   rule_type: "duplicate_ip" | "rate_limit"
   identity_fields: string
+  success_statuses: string
+  success_location_match: string
+  failure_location_match: string
   max_attempts: number
   window_seconds: number
   block_seconds: number

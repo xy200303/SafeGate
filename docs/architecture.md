@@ -128,7 +128,7 @@ SafeGate Proxy Server（PORT）
     │
     ├─ 接收上游响应，按 rewrite_mode 改写响应
     │
-    ├─ duplicate_ip 规则在上游 2xx 后增加计数
+    ├─ duplicate_ip 规则在上游响应满足成功判定后增加计数
     │
     └─ 异步写入 proxy_logs
 ```

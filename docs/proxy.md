@@ -125,7 +125,29 @@ X-Real-IP,X-Forwarded-For,CF-Connecting-IP
 
 1. 规则 `enabled = true`。
 2. 请求路径以 `path_prefix` 开头。
-3. 请求方法在 `methods` 列表中，或 `methods = ALL`。
+3. 若 `query_match` 非空，请求 URL 的 Query 参数需全部满足该配置。
+4. 请求方法在 `methods` 列表中，或 `methods = ALL`。
+
+`query_match` 使用标准 query 字符串格式，例如：
+
+```text
+e=index.post_register
+e=index.post_register&type=1
+```
+
+对于请求：
+
+```text
+/index.php?e=index.post_register&type=1
+```
+
+可配置：
+
+```text
+path_prefix = "/index.php"
+query_match = "e=index.post_register"
+methods = "POST"
+```
 
 ### 身份标识生成
 
@@ -134,7 +156,8 @@ identity = <client_ip>[|<field>=<value>]...
 ```
 
 - 若 `identity_fields` 为空，则仅使用真实 IP。
-- 否则解析 JSON 请求体，按字段顺序提取值并拼接。
+- 否则按字段顺序从请求体提取值并拼接。
+- JSON 请求体使用 `gjson` 路径语法；`application/x-www-form-urlencoded` 和 `multipart/form-data` 表单按字段名读取，并兼容 `user.phone` 对应 `user[phone]` 的常见嵌套表单写法。
 
 示例：真实 IP 为 `1.2.3.4`，`identity_fields = "phone,email"`，请求体为：
 
@@ -148,6 +171,26 @@ identity = <client_ip>[|<field>=<value>]...
 1.2.3.4|phone=13800138000|email=a@example.com
 ```
 
+表单请求也支持相同字段名：
+
+```http
+Content-Type: application/x-www-form-urlencoded
+
+phone=13800138000&email=a@example.com
+```
+
+如果表单使用嵌套字段名：
+
+```http
+user[phone]=13800138000&user[email]=a@example.com
+```
+
+可配置：
+
+```
+identity_fields = "user.phone,user.email"
+```
+
 ### 计数方式
 
 使用 Redis String：
@@ -158,9 +201,33 @@ key = attempt:<rule_id>:<identity>
 
 #### duplicate_ip
 
-- **触发时机**：仅在上游返回 2xx 成功后执行 `INCR`。
+- **触发时机**：请求转发到上游后，根据响应成功判定通过时执行 `INCR`。
 - **典型用途**：限制同一 IP（或 IP+字段）成功注册、成功领取奖励等操作次数。
 - **TTL**：若 `window_seconds > 0`，计数后设置 TTL；`0` 表示永久。
+
+成功判定由以下字段控制：
+
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `success_statuses` | `2xx` | 哪些 HTTP 状态码算成功，支持 `2xx`、`302`、`200-299`、`2xx,302`。 |
+| `success_location_match` | - | 可选。填写后，重定向 `Location` 的 Query 必须匹配才计数。 |
+| `failure_location_match` | - | 可选。匹配到重定向 `Location` 的 Query 时不计数。 |
+
+如果上游注册接口通过 302 跳转表示结果，例如失败时返回：
+
+```http
+HTTP/1.1 302 Found
+Location: /index.php?e=index.msg&key=username_repeat_register
+```
+
+可配置：
+
+```text
+success_statuses = "2xx,302"
+failure_location_match = "key=username_repeat_register"
+```
+
+这样普通 `2xx` 仍算成功，`302` 也可以算成功，但跳转参数里带 `key=username_repeat_register` 的失败响应不会计数。
 
 #### rate_limit
 
@@ -170,7 +237,7 @@ key = attempt:<rule_id>:<identity>
 
 ### 拦截判定
 
-在 `INCR` 之前（`rate_limit`）或上游 2xx 之后（`duplicate_ip`）检查当前计数：
+在 `INCR` 之前（`rate_limit`）或上游响应成功判定通过之后（`duplicate_ip`）检查当前计数：
 
 - 若 `count > max_attempts`，则触发拦截。
 - 返回 `block_status` 状态码和 `block_response` JSON。

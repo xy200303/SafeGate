@@ -100,7 +100,6 @@ func (r *Repository) GetDomainByBind(ctx context.Context, bind string) (*models.
 	return &d, nil
 }
 
-
 func (r *Repository) ListDomains(ctx context.Context) ([]models.Domain, error) {
 	var list []models.Domain
 	err := r.db.WithContext(ctx).Order("id desc").Find(&list).Error
@@ -115,18 +114,22 @@ func (r *Repository) CreateRule(ctx context.Context, rule *models.Rule) error {
 
 func (r *Repository) UpdateRule(ctx context.Context, id uint64, rule *models.Rule) error {
 	return r.db.WithContext(ctx).Model(&models.Rule{}).Where("id = ?", id).Updates(map[string]interface{}{
-		"domain_id":       rule.DomainID,
-		"name":            rule.Name,
-		"path_prefix":     rule.PathPrefix,
-		"methods":         strings.ToUpper(rule.Methods),
-		"rule_type":       rule.RuleType,
-		"identity_fields": rule.IdentityFields,
-		"max_attempts":    rule.MaxAttempts,
-		"window_seconds":  rule.WindowSeconds,
-		"block_seconds":   rule.BlockSeconds,
-		"block_status":    rule.BlockStatus,
-		"block_response":  rule.BlockResponse,
-		"enabled":         rule.Enabled,
+		"domain_id":              rule.DomainID,
+		"name":                   rule.Name,
+		"path_prefix":            rule.PathPrefix,
+		"query_match":            rule.QueryMatch,
+		"methods":                strings.ToUpper(rule.Methods),
+		"rule_type":              rule.RuleType,
+		"identity_fields":        rule.IdentityFields,
+		"success_statuses":       rule.SuccessStatuses,
+		"success_location_match": rule.SuccessLocationMatch,
+		"failure_location_match": rule.FailureLocationMatch,
+		"max_attempts":           rule.MaxAttempts,
+		"window_seconds":         rule.WindowSeconds,
+		"block_seconds":          rule.BlockSeconds,
+		"block_status":           rule.BlockStatus,
+		"block_response":         rule.BlockResponse,
+		"enabled":                rule.Enabled,
 	}).Error
 }
 
